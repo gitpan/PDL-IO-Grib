@@ -44,6 +44,8 @@ pp_def(
 						$ref(), $scale());'	       
 );
 
+
+
 pp_addpm('
 	sub get_ref_val{
 		my($d) = shift;
@@ -102,9 +104,7 @@ pp_def(
 	         byte [o] dataout(n);',
    GenericTypes => [B,F],
    RedoDimsCode => '$SIZE(n)=4;',
-   Code => '
-            printf("encode_ref_val: %f\n",$datain());
-				flt2ibm($datain(),$P(dataout));'
+   Code => 'flt2ibm($datain(),$P(dataout));'
 );
 		      
 pp_addxs('','

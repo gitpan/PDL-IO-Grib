@@ -45,7 +45,9 @@ destroyed.  Otherwise, it is returned to the caller.
 
 package PDL::IO::Grib;
 use vars qw/$VERSION/;
-( $VERSION ) = '$Revision: 1.20 $ ' =~ /\$Revision:\s+([^\s]+)/;
+$VERSION = 2.0;
+#CPAN has problems with CVS version numbers
+#( $VERSION ) = '$Revision: 1.24 $ ' =~ /\$Revision:\s+([^\s]+)/;
 
 use FileHandle;
 use PDL;
@@ -59,7 +61,7 @@ $PDL::IO::Grib::swapbytes=0;
 
 sub new {
     my($type,$filename,$mode) = @_;
-
+ 
     @_ >= 1 or barf 'usage: new PDL::IO::Grib [FILENAME]';
     my $class = shift;
     my $gh={};
@@ -70,18 +72,18 @@ sub new {
     $PDL::IO::Grib::swapbytes=1 if($Config{byteorder} =~ "1234");
     
     if(defined $filename){
-		if(defined $mode){
-		  $gh->{_FILEHANDLE} = new FileHandle "$filename","$mode" or
-			 barf "Failed to open $filename with mode $mode";
-		}else{
-		  $gh->{_FILEHANDLE} = new FileHandle "$filename" or
-			 barf "Failed to open $filename ";
-		}
-		binmode $gh->{_FILEHANDLE};
-		
-		$gh->readgrib() if(-s $filename);
-		
-	 }
+      if(defined $mode){
+	$gh->{_FILEHANDLE} = new FileHandle "$filename","$mode" or
+	  barf "Failed to open $filename with mode $mode";
+      }else{
+	$gh->{_FILEHANDLE} = new FileHandle "$filename" or
+	  barf "Failed to open $filename ";
+      }
+      binmode $gh->{_FILEHANDLE};
+      
+      $gh->readgrib() if(-s $filename);
+      
+    }
 		
     return $gh;
 }
@@ -101,16 +103,22 @@ sub readgrib {
 
   my %fields;
   my $cnt=0;
+
+
   while(!$self->{_FILEHANDLE}->eof){
 #
 # Read in the pds
 #  
     my $f = new PDL::IO::Grib::Field($self->{_FILEHANDLE});
-	 last if($self->{_FILEHANDLE}->eof);
+	 unless(defined $f){
+		barf "Field unreadable at byte ",$self->{_FILEHANDLE}->tell,"\n";
+	 }
     my $id = $f->id();
+    print "id = $id\n" if($PDL::IO::Grib::debug);
 	 barf "No id defined for field $id" unless(defined $id);
     $self->{$id} = $f;
 	 $cnt++;
+	 last if($self->{_FILEHANDLE}->eof);
   }
   $self->get_grib_names();
 
@@ -232,17 +240,17 @@ sub idsort{
 	 or
   $#b<=1
 	 or
-  $a[0] <=> $b[0]
+  $b[0] <=> $a[0]
     or
-  $a[1] <=> $b[1]
+  $b[1] <=> $a[1]
     or
-  $a[2] <=> $b[2]
+  $b[2] <=> $a[2]
     or
-  $a[3] <=> $b[3]
+  $b[3] <=> $a[3]
     or
-  $a[4] <=> $b[4]
+  $b[4] <=> $a[4]
     or
-  $a cmp $b;
+  $b cmp $a;
 }
 
 sub getallfields{
@@ -314,6 +322,16 @@ sub showinventory{
   }
 }
 
+
+sub fieldcnt{
+  my($gh) = @_;
+  my $cnt=0;
+  foreach(keys %$gh){
+    next if(/^[^\d]/); # ignore special keys
+    $cnt++;
+  }
+  $cnt;
+}
 
 =head2 get_grib1_date()
 

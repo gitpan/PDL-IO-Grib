@@ -28,7 +28,13 @@ Need to expand the list of possible grib flavors it can read.
 ECMWF, NCEP, and DWD all have slight variations on the theme.
 It would be nice if it could write too.
 
-New in this version (1.20)
+New in version  2.0 
+I had to change the version number scheme for compatibility with CPAN.
+I added a test.pl which first creates a grib file with various bits per value in the 
+packing scheme.  then reads it back in and makes sure it matchs within some tolerance.
+
+
+New in  version 1.20
 
 Added the script GribView.pl which can be used to view the Grib header data
 and with TriD or PGPLOT to plot simple contours of the data.

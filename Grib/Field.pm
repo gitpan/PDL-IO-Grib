@@ -16,7 +16,7 @@
 
 Field.pm gives you access to the individual fields of a Grib
 file. Here is the code that attempts to decipher each of the sections
-associated with the format.  All of the data is read into PDLS (one
+associated with the format.  All of the data is read into PDLs (one
 for each section) and it only deciphers those pdls on demand.  It only
 knows how to decipher a small subset of the possibilities at this
 time, but should allow the developer to write and test new or local
@@ -30,9 +30,9 @@ to me.
 
 =for ref
 
-  PDL::IO::Grib::Field new creates a new Field structure hash and if passed an
-  open file handle reads the next grib record into that structure.  It reads 
-  each of the sections into a PDL.  
+PDL::IO::Grib::Field new creates a new Field structure hash and if passed an
+open file handle reads the next grib record into that structure.  It reads 
+each of the sections into a PDL.  
 
 =cut
 
@@ -54,13 +54,25 @@ sub new {
   my $field = bless [ \%{"$class\::FIELDS"}], $class;
 
   my $id;
+  $field->{IS} = pdl(byte,[71,82,73,66,0,0,0,1]);
   if(defined $fh){
     $field->initialize($fh);
-	 return if($fh->eof);
+
+
+#	 return if($fh->eof);
   }else{
-	 $field->{IS} = pdl(byte,['G','R','I','B',0,0,0,1]);
     $field->{PDS_len}=28;
+    $field->{PDS} = zeroes(byte,28);
+    $field->{GDS} = zeroes(byte,32);
+    $field->{BDS} = zeroes(byte,11);
+    $field->pds_attribute(1,28);  # default length of PDS
+    $field->pds_attribute(8,128); # GDS defined BMS undef
+    $field->gds_attribute(1,32);  # default length of GDS
   }
+
+#  use Data::Dumper;
+#  my $out = Dumper($field);
+#  print $out;
   return ($field);
 }
 
@@ -123,7 +135,7 @@ sub id{
 
 =for ref
 
-Should only be called from new - reads a Grib record from a file 
+Should only be called from new - reads a Grib record from a file handle
 
 =cut
 
@@ -137,23 +149,31 @@ sub initialize{
 #
   my $tin;
 
-  my $r = $fh->read( $tin, 8);
-  my $sum = 8;
+  my $r = $fh->read( $tin, 4);
+
   until($tin =~ /GRIB$/ || $r==0){
 	 my $in;
     $r = $fh->read( $in, 1);
     $tin .= $in;
-	 $sum++;
   }
 #  $tin =~ s/.*(.{4})GRIB/$1GRIB/;  
   $tin =~ s/.*GRIB/GRIB/;  
 
-  return unless($r>=1);  
+
+
+  unless($r>=1){
+	 warn 'Could not find record marker in file';
+	 return;
+  }
+
+  
   
   my $a =  PDL->zeroes((new PDL::Type(byte)),4);
   $r = PDL::IO::FlexRaw::readchunk($fh,$a,4);
 
-  $field->{IS} = $tin . ${$a->get_dataref};
+  
+  (my $t = $field->{IS}->slice("4:7")) .= $a;
+
 
   my $trl = $a->PDL::unpackint3();
 
@@ -188,7 +208,7 @@ sub initialize{
   }
 
 
-#  print "Trl = $trl $field->{PDS_len} $field->{GDS_len} $field->{BMS_len} $field->{BDS_len}\n";
+  print "Trl = $trl $field->{PDS_len} $field->{GDS_len} $field->{BMS_len} $field->{BDS_len}\n" if($PDL::IO::Grib::debug);
     
 }
 
@@ -212,6 +232,8 @@ sub read_section{
   PDL::IO::FlexRaw::readchunk($fh,$a,3);
 
   my $len = $a->PDL::unpackint3();
+
+  print "section length = $len\n" if($PDL::IO::Grib::debug);
 
   $fh->seek(-3,1);
   my $section;
@@ -251,15 +273,15 @@ sub pds_has_octet12{
 
   my $o10 = $f->pds_attribute(10);
   if($o10 == 100 || 
-	  $o10 == 103 || 
-	  $o10 == 105 || 
-	  $o10 == 107 || 
-	  $o10 == 109 || 
-	  $o10 == 111 || 
-	  $o10 == 113 || 
-	  $o10 == 125 || 
-	  $o10 >= 160 ){
-	 return(0);
+     $o10 == 103 || 
+     $o10 == 105 || 
+     $o10 == 107 || 
+     $o10 == 109 || 
+     $o10 == 111 || 
+     $o10 == 113 || 
+     $o10 == 125 || 
+     $o10 >= 160 ){
+    return(0);
   }
   return(1) ;
 }
@@ -285,26 +307,34 @@ sub pds_attribute{
   my $offset = $num-1;
   if($num==1){
     if(defined $val){
-		my $lof=$offset+3;
-		(my $t=$f->{PDS}->slice("$offset:$lof")) = PDL::packint3($val);
-		$f->{PDS_len}=$val;
+      my $lof=$offset+2;
+      (my $t=$f->{PDS}->slice("$offset:$lof")) .= PDL::packint3($val);
+      $f->{PDS_len}=$val;
     }else{
       return $f->{PDS_len};
     }
   }elsif( $num > $f->{PDS_len}){
     barf("$num is not a valid PDS octet identifier\n");
   }elsif($num == 11){
-	 if($f->pds_has_octet12()){
-      return $f->{PDS}->slice("($offset)");
-	 }else{
-		return $f->{PDS}->slice("$offset:$num")->unpackint2();
-	 }
+    if($f->pds_has_octet12()){
+      if(defined $val){
+		  (my $t = $f->{PDS}->slice("($offset)")) .= $val;
+      }else{
+		  return $f->{PDS}->slice("($offset)");
+      }
+    }else{
+      if(defined $val){
+		  (my $t=$f->{PDS}->slice("$offset:$num")) .= PDL::packint2($val);
+      }else{
+		  return $f->{PDS}->slice("$offset:$num")->unpackint2();
+      }
+    }
   }elsif($num == 12 && !$f->pds_has_octet12()){
-	 return undef;
+    return undef;
   }elsif($num == 22){
-	 if(defined $val){
-		(my $t=$f->{PDS}->slice("$offset:$num")) = PDL::packint2($val);
-	 }else{
+    if(defined $val){
+      (my $t=$f->{PDS}->slice("$offset:$num")) = PDL::packint2($val);
+    }else{
       return  $f->{PDS}->slice("$offset:$num")->unpackint2();
     }
   }elsif($num == 27){
@@ -313,8 +343,10 @@ sub pds_attribute{
   }
   else{
     if(defined $val){
-      print "WARNING - this needs testing\n";
-      (my $t = $f->{PDS}->slice("($offset)")) = $val;
+      if($val<0 or $val>255 or $val != int($val)){
+	barf "ERROR: cannot store $val in byte";
+      }
+      (my $t = $f->{PDS}->slice("($offset)")) .= $val;
     }else{
       return $f->{PDS}->slice("($offset)");
     }
@@ -335,8 +367,8 @@ sub gds_attribute{
 
   if($num==1){
     if(defined $val){
-		my $lof=$offset+3;
-		(my $t=$f->{GDS}->slice("$offset:$lof")) = PDL::packint3($val);
+		my $lof=$offset+2;
+		(my $t=$f->{GDS}->slice("$offset:$lof")) .= PDL::packint3($val);
 		$f->{GDS_len}=$val;
     }else{
       return $f->{GDS_len};
@@ -344,31 +376,71 @@ sub gds_attribute{
   }elsif($num<4 or $num > $f->{GDS_len}){
     barf("$num is not a valid GDS octet identifier\n");
   }elsif($num == 7 || $num == 9){
-    return $f->{GDS}->slice("$offset:$num")->unpackint2();
+    if(defined $val){
+		(my $t=$f->{GDS}->slice("$offset:$num")) .= PDL::packint2($val);
+	 }else{
+		return $f->{GDS}->slice("$offset:$num")->unpackint2();
+	 }
   }elsif($num == 11 || $num == 14 || $num == 18 || $num==21){
-    my $ep=$offset+3;
-    my $tval =  $f->{GDS}->slice("$offset:$ep")->unpackint3('signed');
-    return $tval/1000;
-
+    my $ep=$offset+2;
+	 if(defined $val){
+		(my $t=$f->{GDS}->slice("$offset:$ep")) .= PDL::packint3($val,'signed');
+	 }else{
+		my $tval =  $f->{GDS}->slice("$offset:$ep")->unpackint3('signed');
+		return $tval/1000;
+	 }
 #
 # note that we can't call $f->gds_attribute(5) here, we need to 
 # decode it directly to avoid recursion
 #
   }elsif($num < 255 && $num ==  $f->{GDS}->slice("(4)")){ 
     my $end =  $offset+4*$f->gds_attribute(4)-1;
-    print  $f->{GDS}->nelem," Getting PV $offset:$end\n" if($PDL::IO::Grib::debug);
+	 if(defined $val){
+		(my $t = $f->{GDS}->slice("$offset:$end")).= PDL::IO::Grib::Wgrib::encode_ref_val($val);
+	 }else{
+		print  $f->{GDS}->nelem," Getting PV $offset:$end\n" if($PDL::IO::Grib::debug);
 
-    my $a = $f->{GDS}->slice("$offset:$end")->reshape(4,($end-$offset+1)/4);
+		my $a = $f->{GDS}->slice("$offset:$end")->reshape(4,($end-$offset+1)/4);
 
-    return(PDL::IO::Grib::Wgrib::decode_ref_val($a));
-
+		return(PDL::IO::Grib::Wgrib::decode_ref_val($a));
+	 }
   }
   else{
     if(defined $val){
-      print "WARNING - this needs testing\n";
-      (my $t = $f->{GDS}->slice("($offset)")) = $val;
+      (my $t = $f->{GDS}->slice("($offset)")) .= $val;
     }else{
       return $f->{GDS}->slice("($offset)");
+    }
+  }
+  
+}
+
+=head2 bms_attribute
+
+=for ref
+
+see the pds_attribute description
+
+=cut
+
+
+sub bms_attribute{
+  my($f, $num, $val) = @_;
+
+  my $offset = $num-1;
+  if($num==1){
+    if(defined $val){
+      my $lof=$offset+2;
+      (my $t=$f->{BMS}->slice("$offset:$lof")) .= PDL::packint3($val);
+      $f->{BMS_len}=$val;
+    }else{
+      return $f->{BMS_len};
+    }
+  }else{
+    if(defined $val){
+      (my $t = $f->{BMS}->slice("($offset)")) .= $val;
+    }else{
+      return $f->{BMS}->at($offset);
     }
   }
   
@@ -389,14 +461,15 @@ sub bds_attribute{
 #  print $f->{BDS},"\n";
 
   if($num == 1){
-    my $lof = $offset+3;
+    my $lof = $offset+2;
     if(defined $val){
       (my $t=$f->{BDS}->slice("$offset:$lof")) .= PDL::packint3($val);
     }else{
       return PDL::unpackint3($f->{BDS}->slice("$offset:$lof"));
     }
-  }elsif($num == 4){
+  }elsif($num == 4 && ! defined $val){
     # return an array reference 
+    
     my $v = $f->{BDS}->slice("($offset)");
     return ($v & 128, $v & 64, $v & 32, $v & 16, $v & 15);
   }elsif($num == 5){
@@ -419,10 +492,9 @@ sub bds_attribute{
     }
   }else{
     if(defined $val){
-      print "WARNING - this needs testing\n";
-      (my $t = $f->{BDS}->slice("($offset)")) = $val;
+      (my $t = $f->{BDS}->slice("($offset)")) .= $val;
     }else{
-      return $f->{BDS}->slice("($offset)");
+      return $f->{BDS}->at($offset);
     }
   }
 
@@ -466,12 +538,12 @@ sub section_dump{
   return $out;
 }
 
-=head2 PDL::unpackint
+=head2 PDL::packint3
 
 =for ref
 
-Given a byte pdl and a cnt this function computes an integer representation
-for that (cnt) number of bytes.  There are several 3 byte integers in Grib.
+Given an integer value this packs it into a 3 byte PDL.  The optional signed flag
+causes a signed pack.
 
 =cut
 
@@ -484,6 +556,15 @@ sub PDL::packint3{
   pdl(byte,[$val>>16,($val&65535)>>8,($val&255)]);
 }
 
+=head2 PDL::unpackint3
+
+=for ref
+
+Given a PDL of 3 bytes unpacks into a integer, if the signed flag is on 
+the highest bit indicates sign of the output value.
+
+=cut
+
 sub PDL::unpackint3{
   my($pd,$signed) = @_;
   
@@ -495,6 +576,15 @@ sub PDL::unpackint3{
   
 }
 
+=head2 PDL::packint2
+
+=for ref
+
+Packs the integer passed in $val into a two byte pdl optionally
+setting the signed flag if the signed option is defined.
+
+=cut
+
 sub PDL::packint2{
   my($val,$signed) = @_;
   if(defined $signed && $val<0){
@@ -502,6 +592,15 @@ sub PDL::packint2{
   }
   pdl(byte,[$val>>8,($val&255)]);
 }
+
+=head2 PDL::unpackint2
+
+=for ref
+
+Given a PDL of 2 bytes unpacks into a integer, if the signed flag is on 
+the highest bit indicates sign of the output value.
+
+=cut
 
 sub PDL::unpackint2{
   my($pd,$signed) = @_;
@@ -512,6 +611,12 @@ sub PDL::unpackint2{
   }
   $val;
 }
+
+=for ref
+
+Given a PDL of length $cnt unpacks into a integer.
+
+=cut
 
 sub PDL::unpackint{
   my($slice,$cnt) = @_;
@@ -544,6 +649,16 @@ sub gds_vertical_parameters{
 
 use PDL::IO::Misc qw(bswap2 bswap4);
 
+=head2 read_data
+
+=for ref
+
+Decode the data section of a grib record.  Currently only handles grid
+point simple packing, but should be able to handle any number of bits
+per value.
+
+=cut
+
 sub read_data{
   my($f, $fh)=@_;
 
@@ -561,8 +676,9 @@ sub read_data{
 	 my $ydim = $f->gds_attribute(9);
 
 	 $fh->seek($f->{BDS_pos}+11,0);
+	 my $len = $f->{BDS_len}-11;	 
+    $len-- if($flags[4]>0);
 
-	 my $len = $f->{BDS_len}-12;
 
     if($len<=0){
 		print "Warning: data length reported as 0\n";
@@ -584,37 +700,27 @@ sub read_data{
 		PDL::IO::FlexRaw::readchunk($fh,$dataarray,$len);
 
 		bswap2($dataarray) if($PDL::IO::Grib::swapbytes);
-	 }elsif($bitsperval ==  32){
-		$dataarray = PDL->zeroes((new PDL::Type(long)),$xdim,$ydim);
-		PDL::IO::FlexRaw::readchunk($fh,$dataarray,$len);
-		bswap4($dataarray) if($PDL::IO::Grib::swapbytes);
 	 }else{
 		my $bytearray = PDL->zeroes((new PDL::Type(byte)),$len);
 		$dataarray = PDL->zeroes((new PDL::Type(float)),$xdim*$ydim);
+      
 		PDL::IO::FlexRaw::readchunk($fh,$bytearray,$len);
 		my $bitmap;
 
 		if(defined $f->{BMS}){
 		  $bitmap = $f->{BMS}->slice("6:-1");
 		}else{
-		  $bitmap = 128+PDL->zeroes((new PDL::Type(byte)),$xdim*$ydim/8+1); 
+		  $bitmap = 255+PDL->zeroes((new PDL::Type(byte)),$xdim*$ydim/8+1); 
 		}
       
-      my $val = $bytearray->slice("0:1");
-      print "enter: ",ushort($val)," ",$f->bds_attribute(5)," ",$f->bds_attribute(7),"\n";
-
-        
-      		
 		PDL::IO::Grib::Wgrib::BDSunpack($bytearray,$bitmap, $bitsperval, 
 					 $f->bds_attribute(7),$f->bds_attribute(5), $dataarray);
-
-#      print "exit: ",$dataarray->at(0),"\n";
-
+      $dataarray = $dataarray->reshape($xdim,$ydim);
 		$decoded=1;
 		#		barf "Do not know how to handle $bitsperval bits per value";
     }
 	 unless($decoded || ($f->bds_attribute(5) == 1) && ($f->bds_attribute(7) == 0)){
-	   #	   print "before decode: ",join(' ',$dataarray->minmax),"\n";
+		print "before decode: ",join(' ',$dataarray->minmax),"\n" if($PDL::IO::Grib::debug);
 	   $dataarray=float $dataarray*$f->bds_attribute(5)+ $f->bds_attribute(7);
 	 }
   }else{
@@ -637,21 +743,32 @@ sub read_data{
   return($dataarray);
 }
 
+
+=head2 write_bds
+
+=for ref 
+
+Write the bds section and encoded data to a filehandle (fh), recomputes the 
+data minimum and scale value before packing.
+
+=cut
+
+
+
 sub write_bds{
-  my($f,$fh)=@_;
+  my($f,$fh,$options)=@_;
 
   my @flags = $f->bds_attribute(4);
 
-#  print "flags = @flags\n";
-  $fh->seek($f->{BDS_pos},0);
+  $fh->seek($f->{BDS_pos},0) if(defined $options->{INSERT});
 
   unless(defined $f->{DATA}){
 	 print "DATA not defined for field in write_bds ",$f->{name},"\n";
 	 print $fh $ { $f->{BDS}->get_dataref};
 	 return;
   }
-  print "bds pos = ",$f->{BDS_pos},"\n";
-  my $dataarray = $f->{DATA};
+
+  my $dataarray = double $f->{DATA};
   
   if($flags[0]+$flags[1] == 0){
     # easiest case - grid point simple packing
@@ -686,20 +803,28 @@ sub write_bds{
     }elsif($bitsperval ==  16){
       $dataarray=ushort($dataarray);
       bswap2($dataarray) if($PDL::IO::Grib::swapbytes);
-    }elsif($bitsperval ==  32){
-      $dataarray=long($dataarray);
-      bswap4($dataarray) if($PDL::IO::Grib::swapbytes);
     }else{
-      barf "Cant write that";
+		$dataarray=BDSpack($dataarray,$bitsperval);	
     }
     print $fh $ { $f->{BDS}->get_dataref};
     
     print $fh $ { $dataarray->get_dataref};
 
+    
+	 print $fh  ' '	 if($flags[4]);
   }else{
     barf "Do not know how to handle bds octet 4 = @flags yet";
   }
 }
+
+=head2 write
+
+=for ref 
+
+Write a complete grib record.
+
+=cut
+
 
 sub write{
   my ($field,$fh,$options) = @_;
@@ -708,32 +833,91 @@ sub write{
 # that we are replacing that field with another of the same length
 
   binmode $fh;
+  if(defined $options->{INSERT}){
+	 $fh->seek($field->{PDS_pos}-8,0);
+  }else{
+	 # we don't want to modify the length if we're inserting, do we?
 
-  $fh->seek($field->{PDS_pos}-8,0) if(defined $options->{INSERT});
+	 $field->{BDS_len} = 11+$field->{DATA}->nelem*$field->bds_attribute(11)/8;
+  
 
-  my $trl = length($field->{IS}) + $field->{PDS}->nelem + $field->{BDS_len}+4;
+#    print "BDS_len = ",$field->{BDS_len}," bpv=",$field->bds_attribute(11),"\n";
+	 $field->{BDS_len} = int($field->{BDS_len})+1 
+		if($field->{BDS_len} != int($field->{BDS_len}));
+  
+#    print "BDS_len = ",$field->{BDS_len}," bpv=",$field->bds_attribute(11),"\n";
+	 if($field->{BDS_len} % 2){
+		$field->{BDS_len} = $field->{BDS_len}+1;
+	   my @flags = $field->bds_attribute(4);
+	   my $val = ($flags[0]<<7) + ($flags[1]<<6) + ($flags[2]<<5) + ($flags[3]<<4) + 8;
+		$field->bds_attribute(4,$val);
+	 }
+#    print "BDS_len = ",$field->{BDS_len}," bpv=",$field->bds_attribute(11),"\n";
+	 $field->bds_attribute(1,$field->{BDS_len});
+
+	 if(defined $field->{GDS}){
+		$field->{GDS} = $field->{GDS}->append(pdl [0]) 
+		  if($field->{GDS}->nelem %2);
+		$field->gds_attribute(1,$field->{GDS}->nelem);
+	 }
+	 if(defined $field->{BMS}){
+		$field->{BMS} = $field->{BMS}->append(pdl [0]) 
+		  if($field->{BMS}->nelem %2);
+		$field->bms_attribute(1,$field->{BMS}->nelem);
+	 }
+	 $field->{PDS} = $field->{PDS}->append(pdl [0]) 
+		if($field->{PDS}->nelem %2);
+	 $field->pds_attribute(1,$field->{PDS}->nelem);
+  }
+
+  my $trl = $field->{IS}->nelem + $field->{PDS}->nelem + $field->{BDS_len}+4;
   $trl += $field->{GDS}->nelem if(defined $field->{GDS});
   $trl += $field->{BMS}->nelem if(defined $field->{BMS}) ;
 
-  print $fh $field->{IS};
+  (my $t = $field->{IS}->slice("4:6")) .=  PDL::packint3($trl);
+
+  print $fh $ { $field->{IS}->get_dataref};
+
+  $field->pds_attribute(1,$field->{PDS}->nelem);
 
   print $fh $ { $field->{PDS}->get_dataref};
 
-  if(defined $field->{GDS}){
-	 print $fh $ { $field->{GDS}->get_dataref};
-  }
-  
-  if(defined $field->{BMS}){
-	 print $fh $ { $field->{BMS}->get_dataref};
-  }
-  
-  $field->write_bds($fh);
+  print $fh $ { $field->{GDS}->get_dataref}  if(defined $field->{GDS});
+
+  print $fh $ { $field->{BMS}->get_dataref}if(defined $field->{BMS});
+
+  $field->write_bds($fh,$options);
 
   print $fh '7777';
 
 }
 
+
+sub BDSpack{
+  my($f, $bitsperval) = @_;
   
+  if($f->min<0 or $f->max >= 2**$bitsperval){
+	 barf "Bad range in BDSpack, trying to put ".join(' ',$f->minmax)." into $bitsperval bits\n";
+  }
+
+  my $nvals = $f->nelem*$bitsperval/8;
+
+  $nvals = int($nvals)+1  if($nvals != int($nvals));
+
+  my $pows = 2**zeroes($bitsperval)->xvals->slice("-1:0");
+  
+  my $c = byte(($f->dummy(0) & $pows)>0)->reshape(8,$nvals);
+
+  my $b = ($c->slice("0")<<7) +
+	    ($c->slice("1")<<6) +
+	    ($c->slice("2")<<5) +
+	    ($c->slice("3")<<4) +
+	    ($c->slice("4")<<3) +
+	    ($c->slice("5")<<2) +
+  	    ($c->slice("6")<<1) +
+	    $c->slice("7");
+}
 
 
+  
 1;

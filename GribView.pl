@@ -10,12 +10,14 @@ view the fields as interpreted by the PDL::IO::Grib package.  Maybe one day
 it could also edit the headers, view the data, and allow exports to other formats.
 
 =cut
-
+use blib;
 use strict;
 use warnings;
 use Tk;
 use Tk::FileDialog;
 use PDL::IO::Grib;
+
+$PDL::IO::Grib::debug=1;
 
 my $pgplot;
 my $trid;
@@ -78,7 +80,8 @@ use constant PDS_DEFAULTS => {1=> {name=> 'PDS Length',
 										5=> {name=> 'Center ID'},
 										6=> {name=> 'Generating Process ID'},
 										7=> {name=> 'Grid ID'},
-										8=> {name=> 'GDS/BDS Flag'},
+										8=> {name=> 'GDS/BMS Flag',
+											  type=>'bits'},
 										9=> {name=> 'Parameter and units ID'},
 										10=> {name=> 'Type of level or layer'},
 										11=> {name=> 'Level top'},
@@ -262,6 +265,9 @@ sub FieldSelect{
 	 $section = $_;
 	 ShowSection();
   }
+  my $data = $Field->read_data($GribFile->{_FILEHANDLE});
+  print join(' ',$data->stats),"\n";
+
 }
 
 sub ShowSection{
@@ -314,7 +320,16 @@ sub ShowSection{
 		  }elsif($dtype eq 'char'){
 			 $val = unpack "C",$f->{$section}->slice("($o)");
 		  }elsif($dtype eq 'bits'){
-			 $val = join('',unpack "B8",$f->{$section}->slice("($o)"));
+			 $val = '';
+			 my $tval = $f->{$section}->slice("($o)");
+			 my @twos = (128,64,32,16,8,4,2,1);
+          for(my $i=0;$i<8;$i++){
+				if($tval & $twos[$i]){
+				  $val .= '1';
+				}else{
+				  $val .= '0';
+				}
+			 }
 		  }
 		}else{
 		  $val = $f->{$section}->at($num-1);
@@ -395,9 +410,28 @@ sub lookup_gds_types{
 	 $types->{23}{type}='int3';
 	 $types->{27}{name}='Projection Center flag';
 	 $types->{27}{type}='bits';
-	 $types->{27}{name}='Scanning Mode';
-	 $types->{27}{type}='bits';
-  }
+	 $types->{28}{name}='Scanning Mode';
+	 $types->{28}{type}='bits';
+  }elsif($gds6 == 192){
+    for(7..27){
+		undef $types->{$_};
+	 }
+	 $types->{11}{type}='int3';
+	 $types->{11}{name}='ND: number of diamonds';
+	 $types->{14}{type}='int3';
+	 $types->{14}{name}='NI: intervals on a main side';
+	 $types->{17}{name}='Resolution and componet flags';
+	 $types->{17}{type}='bits';
+	 $types->{18}{name}='LAPP: Location of Isocondrahedral';
+	 $types->{18}{type}='int3';
+	 $types->{21}{name}='LOPP: pole point';
+	 $types->{21}{type}='int3';
+	 $types->{24}{name}='LAMPL';
+	 $types->{24}{type}='int3';
+
+	 $types->{28}{name}='Scanning Mode';
+	 $types->{28}{type}='bits';
+  }	 
 
   for(my $i=0; $i<=$gds4; $i++){
 	 $types->{4*$i+$gds5}{name}="vertical parm $i";
