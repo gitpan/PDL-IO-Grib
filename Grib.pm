@@ -45,7 +45,7 @@ destroyed.  Otherwise, it is returned to the caller.
 
 package PDL::IO::Grib;
 use vars qw/$VERSION/;
-( $VERSION ) = '$Revision: 1.14 $ ' =~ /\$Revision:\s+([^\s]+)/;
+( $VERSION ) = '$Revision: 1.15 $ ' =~ /\$Revision:\s+([^\s]+)/;
 
 use FileHandle;
 use PDL;
@@ -198,25 +198,28 @@ sub idsort{
   my(@a) = split(/:/,$a);
   my(@b) = split(/:/,$b);
 
+#  print "a=@a b=@b\n";
 #
 # avoid errors due to sorting on nonnumeric fields
 #
 
-  $a =~ /^[^\d]/ 
-    or
-  $b =~ /^[^\d]/
-    or  
-  $a[0] <=> $b[0]
-    or
-  $a[1] <=> $b[1]
-    or
-  $a[2] <=> $b[2]
-    or
-  $a[3] <=> $b[3]
-    or
-  $a[4] <=> $b[4]
-    or
-  $a cmp $b;
+  $b[3] <=> $a[3];
+
+#  $a =~ /^[^\d]/ 
+#    or
+#  $b =~ /^[^\d]/
+#    or  
+#  ($a[0]+0) <=> ($b[0]+0)
+#    or
+#  ($a[1]+0) <=> ($b[1]+0)
+#    or
+#  ($a[2]+0) <=> ($b[2]+0)
+#    or
+#  ($a[3]+0) <=> ($b[3]+0)
+#    or
+#  ($a[4]+0) <=> ($b[4]+0)
+#    or
+#  $a cmp $b;
   
 }
 
