@@ -26,7 +26,10 @@ EOD
 
 pp_addhdr('
 void BDS_unpack(float *flt, unsigned char *bits, unsigned char *bitmap,
-	int n_bits, int n, double ref, double scale);');
+	int n_bits, int n, double ref, double scale);
+
+int flt2ibm(float x, unsigned char *ibm);');
+
 
 pp_def(
 	'BDSunpack',
@@ -54,15 +57,18 @@ pp_addpm('
 pp_def(
 	'decode_ref_val',
 	Pars => 'byte datain(m);
-	         float [o] dataout(n);',
+	         float [o] dataout();',
+   
+   RedoDimsCode => '$SIZE(m)=4;',
+   GenericTypes => [B,F],
    Code => '	
    int positive, power;
 	unsigned int abspower;
 	long int mant;
 	double value, exp;
    int m1,m2,m3,m4;
-   loop(n) %{
-     m1 = n*4;
+
+     m1 = 0;
      m2=m1+1;
 	  m3=m2+1;
      m4=m3+1;
@@ -86,9 +92,31 @@ pp_def(
 	  if (power < 0) $dataout() = 1.0 / $dataout();
 	  $dataout() = $dataout() * mant / 16777216.0;
 	  if (positive == 0) $dataout() = -$dataout();
-   %}
+
 	'
 );
+
+pp_def(
+	'encode_ref_val',
+	Pars => 'float datain();
+	         byte [o] dataout(n);',
+   GenericTypes => [B,F],
+   RedoDimsCode => '$SIZE(n)=4;',
+   Code => '
+            printf("encode_ref_val: %f\n",$datain());
+				flt2ibm($datain(),$P(dataout));'
+);
 		      
+pp_addxs('','
+
+int
+flt2ibm(x,ibm)
+	float x
+	unsigned char *ibm
+
+');
+
+
+
 
 pp_done();

@@ -45,7 +45,7 @@ destroyed.  Otherwise, it is returned to the caller.
 
 package PDL::IO::Grib;
 use vars qw/$VERSION/;
-( $VERSION ) = '$Revision: 1.15 $ ' =~ /\$Revision:\s+([^\s]+)/;
+( $VERSION ) = '$Revision: 1.20 $ ' =~ /\$Revision:\s+([^\s]+)/;
 
 use FileHandle;
 use PDL;
@@ -58,6 +58,8 @@ $PDL::IO::Grib::swapbytes=0;
 
 
 sub new {
+    my($type,$filename,$mode) = @_;
+
     @_ >= 1 or barf 'usage: new PDL::IO::Grib [FILENAME]';
     my $class = shift;
     my $gh={};
@@ -67,10 +69,20 @@ sub new {
 
     $PDL::IO::Grib::swapbytes=1 if($Config{byteorder} =~ "1234");
     
-    if (@_) {
-      $gh->readgrib(@_ )
-		  or return undef;
-    }
+    if(defined $filename){
+		if(defined $mode){
+		  $gh->{_FILEHANDLE} = new FileHandle "$filename","$mode" or
+			 barf "Failed to open $filename with mode $mode";
+		}else{
+		  $gh->{_FILEHANDLE} = new FileHandle "$filename" or
+			 barf "Failed to open $filename ";
+		}
+		binmode $gh->{_FILEHANDLE};
+		
+		$gh->readgrib() if(-s $filename);
+		
+	 }
+		
     return $gh;
 }
 
@@ -85,30 +97,26 @@ header information for all variables in the specified grib file.
 
 
 sub readgrib {
-  my($self,$filename) = @_;
-
-  print ">$self<>$filename<\n" if($PDL::IO::Grib::debug);
-
-  my $fh = new FileHandle "$filename" 
-    or barf "Could not open '$filename' for reading";
-  binmode $fh;
-  $self->{_FILEHANDLE} = $fh;
+  my($self) = @_;
 
   my %fields;
   my $cnt=0;
-  while(!$fh->eof){
+  while(!$self->{_FILEHANDLE}->eof){
 #
 # Read in the pds
 #  
-    my $f = new PDL::IO::Grib::Field($fh);
-	 last if($fh->eof);
+    my $f = new PDL::IO::Grib::Field($self->{_FILEHANDLE});
+	 last if($self->{_FILEHANDLE}->eof);
     my $id = $f->id();
 	 barf "No id defined for field $id" unless(defined $id);
     $self->{$id} = $f;
 	 $cnt++;
-#	 last if($cnt==3);
   }
   $self->get_grib_names();
+
+  
+
+
   return $self;
 }
 
@@ -133,13 +141,13 @@ is sorted from the largest value to the smallest value of octets
 =cut
 
 sub getfield{
-  my($gh,$field) = @_;
+  my($gh,$field,$options) = @_;
   
   my ($he,$key);
   my ($level);
 
   if(defined $gh->{$field}){
-	 $gh->{$field}->read_data() unless defined $gh->{$field}{DATA};
+	 $gh->{$field}->read_data($gh->{_FILEHANDLE}) unless defined $gh->{$field}{DATA};
 	 return $gh->{$field}{DATA} ;
   }
 
@@ -151,17 +159,32 @@ sub getfield{
 
   print "looking for >$field<$level<\n"  if($PDL::IO::Grib::debug);
     
-  my @keys = reverse sort idsort keys %$gh;
+  my @keys = keys %$gh;
 
-  foreach $key (@keys){
-	 next unless($key =~ /:/); # special keys
-	 my $name = $gh->{$key}->name();
-	 next unless(defined $name && $name eq $field);
-	 if(defined $level){
-		next unless($key=~/:$level$/);
-	 }
-	 print "lev: $level $key $name $field\n"  if($PDL::IO::Grib::debug);
-	 push(@$he,$gh->{$key});
+# gets rid of the non-numeric fields
+  for my $i (0 .. $#keys-1){
+    unless($keys[$i] =~ /:/){
+#      print "removing $i $#keys $keys[$i]\n";
+      splice(@keys,$i,1);
+      redo;
+    }
+  }
+
+
+  foreach $key (sort idsort @keys){
+#  foreach $key (keys %$gh){
+    next unless($key =~ /:/); # special keys
+    my $name = $gh->{$key}->name();
+    next unless(defined $name && $name eq $field);
+    if(defined $level){
+      next unless($key=~/:$level$/);
+    }
+    print "lev: $level $key $name $field\n"  if($PDL::IO::Grib::debug);
+    push(@$he,$gh->{$key});
+  }
+
+  if(defined $options->{NAMESONLY}){
+	 return $he;
   }
 
   unless(defined $he){
@@ -176,21 +199,28 @@ sub getfield{
     $name=$href->name() ;
     $name.=":$level" if(defined $level);
    
-	 push(@pdllist,$href->read_data());
+	 push(@pdllist,$href->read_data($gh->{_FILEHANDLE}));
 
   }
   
   if($#pdllist==0){
-	 return wantarray ? @pdllist  : $pdllist[0];
+    return wantarray ? @pdllist  : $pdllist[0];
   }elsif($#pdllist>0){
-	 return wantarray ? (sort idsort @pdllist) : stack2d(sort idsort @pdllist);
+    return wantarray ? (@pdllist) : stack2d(@pdllist);
   }
  
 }
 
-
-
-
+sub filehandle{
+  my($self,$val) = @_;
+  
+  if(defined $val){
+    $self->{_FILEHANDLE}->close() if(defined $self->{_FILEHANDLE});
+    $self->{_FILEHANDLE}=$val;
+  }
+  $self->{_FILEHANDLE};
+  
+}
 
 
 sub idsort{
@@ -198,32 +228,22 @@ sub idsort{
   my(@a) = split(/:/,$a);
   my(@b) = split(/:/,$b);
 
-#  print "a=@a b=@b\n";
-#
-# avoid errors due to sorting on nonnumeric fields
-#
-
-  $b[3] <=> $a[3];
-
-#  $a =~ /^[^\d]/ 
-#    or
-#  $b =~ /^[^\d]/
-#    or  
-#  ($a[0]+0) <=> ($b[0]+0)
-#    or
-#  ($a[1]+0) <=> ($b[1]+0)
-#    or
-#  ($a[2]+0) <=> ($b[2]+0)
-#    or
-#  ($a[3]+0) <=> ($b[3]+0)
-#    or
-#  ($a[4]+0) <=> ($b[4]+0)
-#    or
-#  $a cmp $b;
-  
+  $#a<=1
+	 or
+  $#b<=1
+	 or
+  $a[0] <=> $b[0]
+    or
+  $a[1] <=> $b[1]
+    or
+  $a[2] <=> $b[2]
+    or
+  $a[3] <=> $b[3]
+    or
+  $a[4] <=> $b[4]
+    or
+  $a cmp $b;
 }
-
-
 
 sub getallfields{
   my($gh) = @_;

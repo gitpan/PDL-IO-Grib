@@ -30,5 +30,14 @@ It would be nice if it could write too.
 
 New in this version (1.20)
 
+Added the script GribView.pl which can be used to view the Grib header data
+and with TriD or PGPLOT to plot simple contours of the data.
+GribView requires Tk and Tk::FileDialog
+
+Added partial write capability including the ability to update a
+pre-existing file.
+
+
 Uses xs and some code from wgrib to decode data.  Stores all section
 information in pdl format and only decodes on demand.  
+

@@ -6,8 +6,8 @@ use ExtUtils::MakeMaker;
 $package = ["wgrib.pd",Wgrib,PDL::IO::Grib::Wgrib];
 
 %hash = pdlpp_stdargs($package);
-$hash{OBJECT} .= ' BDSunpk$(OBJ_EXT) ';
-$hash{clean}->{FILES} .= ' BDSunpk$(OBJ_EXT) ';
+$hash{OBJECT} .= ' BDSunpk$(OBJ_EXT) flt2ibm$(OBJ_EXT)';
+$hash{clean}->{FILES} .= ' BDSunpk$(OBJ_EXT) flt2ibm$(OBJ_EXT)';
 $hash{'VERSION_FROM'} = '../Grib.pm';
 $hash{PM}->{'Field.pm'} = '$(INST_LIBDIR)/Field.pm';
 $hash{PM}->{'Gribtables.pm'} = '$(INST_LIBDIR)/Gribtables.pm';
