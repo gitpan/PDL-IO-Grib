@@ -3,3 +3,8 @@ Grib.pm
 Makefile.PL
 README
 MANIFEST
+Grib/wgrib.pd
+Grib/Makefile.PL
+Grib/BDSunpk.c
+Grib/Field.pm
+Grib/Gribtables.pm

@@ -6,6 +6,9 @@ Grib.pm allows the user to read files in the grib FORM FM 92-IX
 Ext. GRIB into perl PDL - it may not read all possible grib format
 combinations.
 
+If you want to use this module you'll need to have some understanding
+of the format as the module refers to section octet numbers rather
+than trying to name all of the fields.  The manual is available on line at:
 http://www.wmo.ch/web/www/reports/Guide-binary-2.html
 
 Prerequisites - You need to have the perl PDL module installed.
@@ -19,10 +22,13 @@ $ perl Makefile.pl
 $ make 
 $ make install
 
-
-
 Changes / enhancements you plan to make in the future:
 
 Need to expand the list of possible grib flavors it can read.  
 ECMWF, NCEP, and DWD all have slight variations on the theme.
 It would be nice if it could write too.
+
+New in this version (1.20)
+
+Uses xs and some code from wgrib to decode data.  Stores all section
+information in pdl format and only decodes on demand.  
